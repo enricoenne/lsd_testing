@@ -1,0 +1,15 @@
+conda create -n lsd-env python=3.10.16
+conda activate lsd-env
+conda install lsds -c conda-forge
+pip install lsds pooch
+pip install skimage
+python -m pip install -U scikit-image
+conda install h5py
+conda install matplotlib
+
+
+pip install ipywidgets
+pip install jupyter_contrib_nbextensions
+pip install notebook==6.4.12
+jupyter contrib nbextension install --user
+jupyter nbextension enable --py --sys-prefix widgetsnbextension
