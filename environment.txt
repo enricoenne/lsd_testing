@@ -7,9 +7,14 @@ python -m pip install -U scikit-image
 conda install h5py
 conda install matplotlib
 
-
+    this is to make the interactive plots in notebooks work
 pip install ipywidgets
 pip install jupyter_contrib_nbextensions
 pip install notebook==6.4.12
 jupyter contrib nbextension install --user
 jupyter nbextension enable --py --sys-prefix widgetsnbextension
+
+
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip install zarr
+pip install git+https://github.com/funkelab/funlib.learn.torch.git
