@@ -15,3 +15,6 @@ docker/setup.py
 singularity/lsd
 singularity/requirements.txt
 singularity/setup.py
+
+lsd/tutorial/notebooks/sample_data.zarr
+lsd/tutorial/notebooks/training_data.zarr
