@@ -9,6 +9,7 @@ import random
 import torch
 import torch.nn as nn
 import torchvision
+import torchvision.transforms as T
 import skimage
 
 from glob import glob
@@ -174,6 +175,19 @@ class CellDataset(Dataset):
     def normalize(self, data):
         return (data - np.min(data)) / (np.max(data) - np.min(data)).astype(np.float32)
 
+    def predict_lsds(self, raw):
+        activation = torch.nn.Sigmoid()
+
+        transform_tensor = T.ToTensor()
+
+        raw_tensor = transform_tensor(raw).unsqueeze(0).to(device)
+
+        lsd_logits = self.model(raw_tensor)
+        lsd_pred = activation(lsd_logits)
+        lsd_pred = lsd_pred.cpu().detach().numpy()
+
+        return lsd_pred.squeeze(0)
+
     def __getitem__(self, idx):
 
         raw = self.images[idx]
@@ -200,21 +214,15 @@ class CellDataset(Dataset):
             if self.model is None:
                 input = self.get_lsds(labels)
             else:
-                activation = torch.nn.Sigmoid()
-
-                transform_tensor = T.ToTensor()
-
-                raw_tensor = transform_tensor(raw).unsqueeze(0).to(device)
-
-                lsd_logits = self.model(raw_tensor)
-                lsd_pred = activation(lsd_logits)
-                lsd_pred = lsd_pred.cpu().detach().numpy()
-
-                input = lsd_pred.squeeze(0)
+                input = self.predict_lsds(raw)
             
 
         elif self.input_type == 'raw_lsds':
-            input = np.concatenate((np.expand_dims(raw, axis=0), self.get_lsds(labels)), axis=0)
+            if self.model is None:
+                current_lsds = self.get_lsds(labels)
+            else:
+                current_lsds = self.predict_lsds(raw)
+            input = np.concatenate((np.expand_dims(raw, axis=0), current_lsds), axis=0)
         
 
         # depending on the model I need different outputs
@@ -653,6 +661,16 @@ def model_training(input_dataset,
     num_in_channels = possible_inputs[input_type]
     num_out_channels = possible_outputs[output_type]
 
+    input_info = ''
+    if input_type == 'lsds' or input_type == 'raw_lsds':
+        if model_lsds is not None:
+            input_info = '_pred'
+        else:
+            input_info = '_gt'
+    
+    print()
+    print('training model: ' + input_type + input_info + ' -> ' + output_type)
+
     # create our network
 
     d_factors = [[2,2],[2,2],[2,2]]
@@ -805,12 +823,12 @@ def model_training(input_dataset,
     if save_model:
         if os.path.exists('output') == False:
             os.makedirs('output')
+        
+        torch.save(model.state_dict(), 'output/' + input_type + input_info + '-' + output_type + '.pth')
+        print('model saved as output/' + input_type + input_info + '-' + output_type + '.pth')
 
-        torch.save(model.state_dict(), 'output/' + input_type + '-' + output_type + '.pth')
-        print('model saved as output/' + input_type + '-' + output_type + '.pth')
-
-        metrics.to_csv('output/' + input_type + '-' + output_type + '.csv', index=False)
-        print('metrics saved as output/' + input_type + '-' + output_type + '.csv')
+        metrics.to_csv('output/' + input_type + input_info + '-' + output_type + '.csv', index=False)
+        print('metrics saved as output/' + input_type + input_info + '-' + output_type + '.csv')
 
     if show_metrics:
         plt.plot(metrics['step'], metrics['loss'])
@@ -846,25 +864,39 @@ testing = [('lsds','boundaries'),
 
 model_lsds_path = '/home/enrico.negri/github/lsd_testing/output_5000_4_512/raw-lsds.pth'
 
-model_loader(model_lsds_path)
+model_lsd = model_loader(model_lsds_path)
 
 print('model loaded')
 print()
 
+training_steps = 101
+batch_size = 1
+crop_size = 128
 
 for k in testing:
     input_type, output_type = k
 
-    print()
-    print('training model: ' + input_type + ' -> ' + output_type)
+    if input_type == 'lsds' or input_type == 'raw_lsds':
+        for model in (None, model_lsd):
+            model_training(input_dataset,
+                        segmentation_dataset,
+                        input_type,
+                        output_type,
+                        training_steps = training_steps,
+                        batch_size = batch_size,
+                        crop_size = crop_size,
+                        show_metrics = False,
+                        model_lsds = model)
+    else:
+        model_training(input_dataset,
+            segmentation_dataset,
+            input_type,
+            output_type,
+            training_steps = training_steps,
+            batch_size = batch_size,
+            crop_size = crop_size,
+            show_metrics = False)
 
-    model_training(input_dataset,
-                segmentation_dataset,
-                input_type,
-                output_type,
-                training_steps = 5000,
-                batch_size = 4,
-                crop_size = 512,
-                show_metrics=False)
+
 
 
