@@ -40,7 +40,8 @@ class CellDataset(Dataset):
         padding_size=8,
         input_type = 'raw',
         output_type = 'labels',
-        split = 'train'):
+        split = 'train',
+        model = None):
 
         self.images = sorted(glob(image_dir))
         self.masks = sorted(glob(mask_dir))
@@ -52,6 +53,9 @@ class CellDataset(Dataset):
         self.output_type = output_type
 
         self.split = split
+
+        # model to use predictions as input
+        self.model = model
 
 
     def __len__(self):
@@ -184,16 +188,30 @@ class CellDataset(Dataset):
 
         padding = self.get_padding(self.crop_size, self.padding_size)
 
+        # augment data
         raw, labels = self.augment_data(raw, labels, padding)
         
-
 
         # depending on the model I need different inputs
         if self.input_type == 'raw':
             input = np.expand_dims(raw, axis=0)
 
         elif self.input_type == 'lsds':
-            input = self.get_lsds(labels)
+            if self.model is None:
+                input = self.get_lsds(labels)
+            else:
+                activation = torch.nn.Sigmoid()
+
+                transform_tensor = T.ToTensor()
+
+                raw_tensor = transform_tensor(raw).unsqueeze(0).to(device)
+
+                lsd_logits = self.model(raw_tensor)
+                lsd_pred = activation(lsd_logits)
+                lsd_pred = lsd_pred.cpu().detach().numpy()
+
+                input = lsd_pred.squeeze(0)
+            
 
         elif self.input_type == 'raw_lsds':
             input = np.concatenate((np.expand_dims(raw, axis=0), self.get_lsds(labels)), axis=0)
@@ -215,8 +233,8 @@ class CellDataset(Dataset):
             output = np.concatenate((boundaries, self.get_lsds(labels)), axis=0)
         
 
-
         return input, output
+
 
 # model creation
 class ConvPass(torch.nn.Module):
@@ -598,6 +616,27 @@ class UNet(torch.nn.Module):
 
         return y
 
+def model_loader(model_path):
+    model = UNet(
+        in_channels=1,
+        num_fmaps=12,
+        fmap_inc_factors=5,
+        downsample_factors=[[2,2],[2,2],[2,2]],
+        padding='same',
+        constant_upsample=True)
+
+
+    model = torch.nn.Sequential(
+        model,
+        torch.nn.Conv2d(in_channels=12,out_channels=6, kernel_size=1)
+    ).to(device)
+
+
+    model.load_state_dict(torch.load(model_path, weights_only=True))
+    model.eval()
+
+    return model
+
 
 def model_training(input_dataset,
                    segmentation_dataset,
@@ -608,7 +647,8 @@ def model_training(input_dataset,
                    learning_rate = 1e-4,
                    batch_size = 4,
                    save_model = True,
-                   show_metrics = True):
+                   show_metrics = True,
+                   model_lsds = None):
     
     num_in_channels = possible_inputs[input_type]
     num_out_channels = possible_outputs[output_type]
@@ -646,22 +686,23 @@ def model_training(input_dataset,
     # set activation
     activation = torch.nn.Sigmoid()
 
+
     ### create datasets
-
-
     train_dataset = CellDataset(
         image_dir='/group/jug/Enrico/TISSUE_roi_projection/training/*' + input_dataset + '.tif',
         mask_dir='/group/jug/Enrico/TISSUE_roi_projection/training/*' + segmentation_dataset + '.tif',
         crop_size=crop_size,
         split='train',
-        input_type=input_type, output_type=output_type)
+        input_type=input_type, output_type=output_type,
+        model=model_lsds)
 
     val_dataset = CellDataset(
         image_dir='/group/jug/Enrico/TISSUE_roi_projection/validation/*' + input_dataset + '.tif',
         mask_dir='/group/jug/Enrico/TISSUE_roi_projection/validation/*' + segmentation_dataset + '.tif',
         crop_size=crop_size,
         split='val',
-        input_type=input_type, output_type=output_type)
+        input_type=input_type, output_type=output_type,
+        model=model_lsds)
 
 
     #batch_size = 4
@@ -796,11 +837,20 @@ segmentation_dataset = '_CELL_manual'
 
 
 
-testing = [('raw','boundaries'),
-           ('raw','lsds'),
+testing = [('lsds','boundaries'),
+           ('raw_lsds','boundaries'),
            ('raw','boundaries_lsds'),
-           ('lsds','boundaries'),
-           ('raw_lsds','boundaries')]
+           ('raw','boundaries'),
+           ('raw','lsds')]
+
+
+model_lsds_path = '/home/enrico.negri/github/lsd_testing/output_5000_4_512/raw-lsds.pth'
+
+model_loader(model_lsds_path)
+
+print('model loaded')
+print()
+
 
 for k in testing:
     input_type, output_type = k
@@ -813,7 +863,7 @@ for k in testing:
                 input_type,
                 output_type,
                 training_steps = 5000,
-                batch_size=4,
+                batch_size = 4,
                 crop_size = 512,
                 show_metrics=False)
 
