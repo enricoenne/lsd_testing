@@ -42,7 +42,8 @@ class CellDataset(Dataset):
         input_type = 'raw',
         output_type = 'labels',
         split = 'train',
-        model = None):
+        model = None,
+        sigma = 10):
 
         self.images = sorted(glob(image_dir))
         self.masks = sorted(glob(mask_dir))
@@ -57,6 +58,9 @@ class CellDataset(Dataset):
 
         # model to use predictions as input
         self.model = model
+
+        # sigma for local shape descriptor
+        self.sigma = sigma
 
 
     def __len__(self):
@@ -102,7 +106,7 @@ class CellDataset(Dataset):
         
         lsds = local_shape_descriptor.get_local_shape_descriptors(
                 segmentation=labels,
-                sigma=(5,)*2,
+                sigma=(self.sigma,)*2,
                 voxel_size=(1,)*2)
         
         return lsds.astype(np.float32)
@@ -656,7 +660,8 @@ def model_training(input_dataset,
                    batch_size = 4,
                    save_model = True,
                    show_metrics = True,
-                   model_lsds = None):
+                   model_lsds = None,
+                   lsd_sigma = 10):
     
     num_in_channels = possible_inputs[input_type]
     num_out_channels = possible_outputs[output_type]
@@ -670,6 +675,7 @@ def model_training(input_dataset,
     
     print()
     print('training model: ' + input_type + input_info + ' -> ' + output_type)
+    print(f'steps: {training_steps}    batch: {batch_size}    crop: {crop_size}    lr: {learning_rate}    lsd_s: {lsd_sigma}')
 
     # create our network
 
@@ -712,7 +718,8 @@ def model_training(input_dataset,
         crop_size=crop_size,
         split='train',
         input_type=input_type, output_type=output_type,
-        model=model_lsds)
+        model=model_lsds,
+        sigma = lsd_sigma)
 
     val_dataset = CellDataset(
         image_dir='/group/jug/Enrico/TISSUE_roi_projection/validation/*' + input_dataset + '.tif',
@@ -720,7 +727,8 @@ def model_training(input_dataset,
         crop_size=crop_size,
         split='val',
         input_type=input_type, output_type=output_type,
-        model=model_lsds)
+        model=model_lsds,
+        sigma = lsd_sigma)
 
 
     #batch_size = 4
@@ -820,15 +828,16 @@ def model_training(input_dataset,
                     metrics.loc[len(metrics)] = new_row
                     metrics = metrics.reset_index(drop=True)
 
+    output_folder_name = 'output/step' + str(step) + '_b' + str(batch_size) + '_c' + str(crop_size) + '_lr' + str(learning_rate) + '_s' + str(lsd_sigma)
     if save_model:
-        if os.path.exists('output') == False:
-            os.makedirs('output')
+        if os.path.exists(output_folder_name) == False:
+            os.makedirs(output_folder_name)
         
-        torch.save(model.state_dict(), 'output/' + input_type + input_info + '-' + output_type + '.pth')
-        print('model saved as output/' + input_type + input_info + '-' + output_type + '.pth')
+        torch.save(model.state_dict(), output_folder_name + '/' + input_type + input_info + '-' + output_type +'.pth')
 
-        metrics.to_csv('output/' + input_type + input_info + '-' + output_type + '.csv', index=False)
-        print('metrics saved as output/' + input_type + input_info + '-' + output_type + '.csv')
+        metrics.to_csv(output_folder_name + '/' + input_type + input_info + '-' + output_type + '.csv', index=False)
+        print('output: ' + output_folder_name)
+
 
     if show_metrics:
         plt.plot(metrics['step'], metrics['loss'])
@@ -855,25 +864,40 @@ segmentation_dataset = '_CELL_manual'
 
 
 
-testing = [('lsds','boundaries'),
-           ('raw_lsds','boundaries'),
+testing = [('raw','boundaries'),
            ('raw','boundaries_lsds'),
-           ('raw','boundaries'),
-           ('raw','lsds')]
+           ('raw','lsds'),
+           ('lsds','boundaries'),
+           ('raw_lsds','boundaries')]
 
 
-model_lsds_path = '/home/enrico.negri/github/lsd_testing/output_5000_4_512/raw-lsds.pth'
+model_lsds_path = '/home/enrico.negri/github/lsd_testing/output_5000_14_256_s10/raw-lsds.pth'
 
 model_lsd = model_loader(model_lsds_path)
 
-print('model loaded')
 print()
+print('model loaded')
 
-training_steps = 101
-batch_size = 1
-crop_size = 128
+training_steps = 10000
+batch_size = 14
+crop_size = 256
 
-for k in testing:
+'''
+if we are testing things for the first time
+'''
+testing = [('raw','lsds'),
+           ('raw','boundaries_lsds')]
+###########################################
+
+'''
+later
+'''
+testing = [('lsds','boundaries'),
+           ('raw_lsds','boundaries'),
+           ('raw','boundaries')]
+###########################################
+
+'''for k in testing:
     input_type, output_type = k
 
     if input_type == 'lsds' or input_type == 'raw_lsds':
@@ -895,7 +919,25 @@ for k in testing:
             training_steps = training_steps,
             batch_size = batch_size,
             crop_size = crop_size,
-            show_metrics = False)
+            show_metrics = False)'''
+
+
+
+input_type, output_type = 'raw', 'lsds'
+
+sigmas = [5, 10, 15, 20, 30, 50]
+
+for sigma in sigmas:
+    model_training(input_dataset,
+                segmentation_dataset,
+                input_type,
+                output_type,
+                training_steps = training_steps,
+                batch_size = batch_size,
+                crop_size = crop_size,
+                show_metrics = False,
+                lsd_sigma = sigma)
+
 
 
 
