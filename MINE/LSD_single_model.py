@@ -661,7 +661,8 @@ def model_training(input_dataset,
                    save_model = True,
                    show_metrics = True,
                    model_lsds = None,
-                   lsd_sigma = 10):
+                   lsd_sigma = 10,
+                   output_folder = ''):
     
     num_in_channels = possible_inputs[input_type]
     num_out_channels = possible_outputs[output_type]
@@ -828,7 +829,7 @@ def model_training(input_dataset,
                     metrics.loc[len(metrics)] = new_row
                     metrics = metrics.reset_index(drop=True)
 
-    output_folder_name = 'output/step' + str(step) + '_b' + str(batch_size) + '_c' + str(crop_size) + '_lr' + str(learning_rate) + '_s' + str(lsd_sigma)
+    output_folder_name = 'output/'+ output_folder +'/step' + str(training_steps) + '_b' + str(batch_size) + '_c' + str(crop_size) + '_lr' + str(learning_rate) + '_s' + str(lsd_sigma)
     if save_model:
         if os.path.exists(output_folder_name) == False:
             os.makedirs(output_folder_name)
@@ -871,16 +872,18 @@ testing = [('raw','boundaries'),
            ('raw_lsds','boundaries')]
 
 
-model_lsds_path = '/home/enrico.negri/github/lsd_testing/output_5000_14_256_s10/raw-lsds.pth'
+'''model_lsds_path = '/home/enrico.negri/github/lsd_testing/output_5000_14_256_s10/raw-lsds.pth'
 
 model_lsd = model_loader(model_lsds_path)
 
 print()
-print('model loaded')
+print('model loaded')'''
 
 training_steps = 10000
 batch_size = 14
 crop_size = 256
+
+lr = 1e-4
 
 '''
 if we are testing things for the first time
@@ -927,7 +930,11 @@ input_type, output_type = 'raw', 'lsds'
 
 sigmas = [5, 10, 15, 20, 30, 50]
 
+
 for sigma in sigmas:
+    model_name = '/home/enrico.negri/github/lsd_testing/output/different_sigmas/step10000_b14_c256_lr0.0001_s' + str(sigma) +'/raw-lsds.pth'
+    model_lsd = model_loader(model_name)
+    print('model_loaded')
     model_training(input_dataset,
                 segmentation_dataset,
                 input_type,
@@ -936,7 +943,8 @@ for sigma in sigmas:
                 batch_size = batch_size,
                 crop_size = crop_size,
                 show_metrics = False,
-                lsd_sigma = sigma)
+                lsd_sigma = sigma,
+                output_folder = 'lsd-bound_sigmas')
 
 
 
