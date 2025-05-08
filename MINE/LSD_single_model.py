@@ -110,6 +110,66 @@ class CellDataset(Dataset):
                 voxel_size=(1,)*2)
         
         return lsds.astype(np.float32)
+    
+    # get affinities (see gunpowder package)
+    def get_aff(self, seg):
+
+        nhood=[
+            [0, -1],
+            [-1, 0]]
+
+        nhood = np.array(nhood)
+
+        # constructs an affinity graph from a segmentation
+        # assume affinity graph is represented as:
+        # shape = (e, z, y, x)
+        # nhood.shape = (edges, 3)
+        shape = seg.shape
+        nEdge = nhood.shape[0]
+        dims = nhood.shape[1]
+        aff = np.zeros((nEdge,) + shape, dtype=np.int32)
+
+        if dims == 2:
+
+            for e in range(nEdge):
+                aff[e, \
+                    max(0,-nhood[e,0]):min(shape[0],shape[0]-nhood[e,0]), \
+                    max(0,-nhood[e,1]):min(shape[1],shape[1]-nhood[e,1])] = \
+                                (seg[max(0,-nhood[e,0]):min(shape[0],shape[0]-nhood[e,0]), \
+                                    max(0,-nhood[e,1]):min(shape[1],shape[1]-nhood[e,1])] == \
+                                seg[max(0,nhood[e,0]):min(shape[0],shape[0]+nhood[e,0]), \
+                                    max(0,nhood[e,1]):min(shape[1],shape[1]+nhood[e,1])] ) \
+                                * ( seg[max(0,-nhood[e,0]):min(shape[0],shape[0]-nhood[e,0]), \
+                                    max(0,-nhood[e,1]):min(shape[1],shape[1]-nhood[e,1])] > 0 ) \
+                                * ( seg[max(0,nhood[e,0]):min(shape[0],shape[0]+nhood[e,0]), \
+                                    max(0,nhood[e,1]):min(shape[1],shape[1]+nhood[e,1])] > 0 )
+
+        elif dims == 3:
+
+            for e in range(nEdge):
+                aff[e, \
+                    max(0,-nhood[e,0]):min(shape[0],shape[0]-nhood[e,0]), \
+                    max(0,-nhood[e,1]):min(shape[1],shape[1]-nhood[e,1]), \
+                    max(0,-nhood[e,2]):min(shape[2],shape[2]-nhood[e,2])] = \
+                                (seg[max(0,-nhood[e,0]):min(shape[0],shape[0]-nhood[e,0]), \
+                                    max(0,-nhood[e,1]):min(shape[1],shape[1]-nhood[e,1]), \
+                                    max(0,-nhood[e,2]):min(shape[2],shape[2]-nhood[e,2])] == \
+                                seg[max(0,nhood[e,0]):min(shape[0],shape[0]+nhood[e,0]), \
+                                    max(0,nhood[e,1]):min(shape[1],shape[1]+nhood[e,1]), \
+                                    max(0,nhood[e,2]):min(shape[2],shape[2]+nhood[e,2])] ) \
+                                * ( seg[max(0,-nhood[e,0]):min(shape[0],shape[0]-nhood[e,0]), \
+                                    max(0,-nhood[e,1]):min(shape[1],shape[1]-nhood[e,1]), \
+                                    max(0,-nhood[e,2]):min(shape[2],shape[2]-nhood[e,2])] > 0 ) \
+                                * ( seg[max(0,nhood[e,0]):min(shape[0],shape[0]+nhood[e,0]), \
+                                    max(0,nhood[e,1]):min(shape[1],shape[1]+nhood[e,1]), \
+                                    max(0,nhood[e,2]):min(shape[2],shape[2]+nhood[e,2])] > 0 )
+
+        else:
+
+            raise RuntimeError(
+                f"AddAffinities works only in 2 or 3 dimensions, not {dims}")
+
+        return aff.astype(np.float32)
 
     # takes care of padding
     def get_padding(self, crop_size, padding_size):
@@ -179,19 +239,6 @@ class CellDataset(Dataset):
     def normalize(self, data):
         return (data - np.min(data)) / (np.max(data) - np.min(data)).astype(np.float32)
 
-    def predict_lsds(self, raw):
-        activation = torch.nn.Sigmoid()
-
-        transform_tensor = T.ToTensor()
-
-        raw_tensor = transform_tensor(raw).unsqueeze(0).to(device)
-
-        lsd_logits = self.model(raw_tensor)
-        lsd_pred = activation(lsd_logits)
-        lsd_pred = lsd_pred.cpu().detach().numpy()
-
-        return lsd_pred.squeeze(0)
-
     def __getitem__(self, idx):
 
         raw = self.images[idx]
@@ -218,15 +265,21 @@ class CellDataset(Dataset):
             if self.model is None:
                 input = self.get_lsds(labels)
             else:
-                input = self.predict_lsds(raw)
+                activation = torch.nn.Sigmoid()
+
+                transform_tensor = T.ToTensor()
+
+                raw_tensor = transform_tensor(raw).unsqueeze(0).to(device)
+
+                lsd_logits = self.model(raw_tensor)
+                lsd_pred = activation(lsd_logits)
+                lsd_pred = lsd_pred.cpu().detach().numpy()
+
+                input = lsd_pred.squeeze(0)
             
 
         elif self.input_type == 'raw_lsds':
-            if self.model is None:
-                current_lsds = self.get_lsds(labels)
-            else:
-                current_lsds = self.predict_lsds(raw)
-            input = np.concatenate((np.expand_dims(raw, axis=0), current_lsds), axis=0)
+            input = np.concatenate((np.expand_dims(raw, axis=0), self.get_lsds(labels)), axis=0)
         
 
         # depending on the model I need different outputs
@@ -234,7 +287,12 @@ class CellDataset(Dataset):
             output = np.expand_dims(labels, axis=0).astype(np.float32)
 
         elif self.output_type == 'lsds':
-            output = self.get_lsds(labels)
+            lsds = self.get_lsds(labels)
+            output = lsds
+
+            plt.imshow(np.squeeze(lsds[0,:,:]), cmap='jet')
+            plt.imshow(np.squeeze(lsds[1,:,:]), cmap='jet', alpha=0.5)
+            plt.show()
 
         elif self.output_type == 'boundaries':
             boundaries = skimage.segmentation.find_boundaries(labels)[None].astype(np.float32)
@@ -243,9 +301,18 @@ class CellDataset(Dataset):
         elif self.output_type == 'boundaries_lsds':
             boundaries = skimage.segmentation.find_boundaries(labels)[None].astype(np.float32)
             output = np.concatenate((boundaries, self.get_lsds(labels)), axis=0)
+
+        elif self.output_type == 'affinities':
+            output = self.get_aff(labels)
+
+        elif self.output_type == 'affinities_lsds':
+            aff = self.get_aff(labels)
+            output = np.concatenate((aff, self.get_lsds(labels)), axis=0)
         
 
+
         return input, output
+
 
 
 # model creation
@@ -856,7 +923,9 @@ possible_inputs = {'raw': 1,
 possible_outputs = {'labels': 1,
                     'lsds': 6,
                     'boundaries': 1,
-                    'boundaries_lsds': 7}
+                    'boundaries_lsds': 7,
+                    'affinities': 2,
+                    'affinities_lsds': 8}
 
 
 input_dataset = '_GFP_max_clahe'
@@ -926,7 +995,7 @@ testing = [('lsds','boundaries'),
 
 
 
-input_type, output_type = 'raw', 'lsds'
+input_type, output_type = 'lsds', 'affinities'
 
 sigmas = [5, 10, 15, 20, 30, 50]
 
@@ -944,6 +1013,7 @@ for sigma in sigmas:
                 crop_size = crop_size,
                 show_metrics = False,
                 lsd_sigma = sigma,
+                model_lsds=model_lsd,
                 output_folder = 'lsd-bound_sigmas')
 
 
