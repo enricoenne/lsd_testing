@@ -18,3 +18,11 @@ singularity/setup.py
 
 lsd/tutorial/notebooks/sample_data.zarr
 lsd/tutorial/notebooks/training_data.zarr
+
+lsd/tutorial/notebooks/images
+lsd/tutorial/notebooks/masks
+
+lsd/tutorial/notebooks/__MACOSX
+lsd/tutorial/notebooks/testing_data.zarr
+
+output/
