@@ -77,10 +77,11 @@ def model_training(input_dataset,
 
     model = torch.nn.Sequential(
         unet,
-        torch.nn.Conv2d(in_channels=num_fmaps,out_channels=num_out_channels, kernel_size=1)
+        torch.nn.Conv2d(in_channels=num_fmaps,out_channels=num_out_channels, kernel_size=1),
+        torch.nn.Sigmoid()
     ).to(device)
 
-    loss_fn_boundaries = torch.nn.BCEWithLogitsLoss().to(device)
+    loss_fn_boundaries = torch.nn.BCELoss().to(device)
     loss_fn_lsds = torch.nn.MSELoss().to(device)
 
 
@@ -123,36 +124,36 @@ def model_training(input_dataset,
 
     # training step
 
-    def model_step(model, optimizer, feature, gt_target, activation, train_step=True):
+    def model_step(model, optimizer, feature, gt_target, train_step=True):
         
         # zero gradients if training
         if train_step:
             optimizer.zero_grad()
             
         # forward
-        target_logits = model(feature)
+        target_pred = model(feature)
 
         if output_type == 'boundaries':
-            logits_boundaries = target_logits[:, 0, :, :]
+            pred_boundaries = target_pred[:, 0, :, :]
             gt_boundaries = gt_target[:, 0, :, :]
-            logits_lsds = None
+            pred_lsds = None
         elif output_type == 'boundaries_lsds':
-            logits_boundaries = target_logits[:, 0, :, :]
+            pred_boundaries = target_pred[:, 0, :, :]
             gt_boundaries = gt_target[:, 0, :, :]
-            logits_lsds = target_logits[:, 1:7, :, :]
+            pred_lsds = target_pred[:, 1:7, :, :]
             gt_lsds = gt_target[:, 1:7, :, :]
         elif output_type == 'lsds':
-            logits_boundaries = None
-            logits_lsds = target_logits[:, 0:6, :, :]
+            pred_boundaries = None
+            pred_lsds = target_pred[:, 0:6, :, :]
             gt_lsds = gt_target[:, 0:6, :, :]
 
-        if logits_boundaries is not None:
-            loss_boundaries = loss_fn_boundaries(logits_boundaries, gt_boundaries)
+        if pred_boundaries is not None:
+            loss_boundaries = loss_fn_boundaries(pred_boundaries, gt_boundaries)
         else:
             loss_boundaries = 0
 
-        if logits_lsds is not None:
-            loss_lsds = loss_fn_lsds(logits_lsds, gt_lsds)
+        if pred_lsds is not None:
+            loss_lsds = loss_fn_lsds(pred_lsds, gt_lsds)
         else:
             loss_lsds = 0
 
@@ -165,11 +166,9 @@ def model_training(input_dataset,
             optimizer.step()
 
             
-        target_output = activation(target_logits)
     
         outputs = {
-            'pred_target': target_output,
-            'target_logits': target_logits,
+            'pred_target': target_pred,
         }
 
         loss_value = loss_value.cpu().detach().numpy()

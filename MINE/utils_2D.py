@@ -796,7 +796,8 @@ def model_loader(model_path, n_in = 1, n_out = 6):
 
     model = torch.nn.Sequential(
         model,
-        torch.nn.Conv2d(in_channels=12,out_channels=n_out, kernel_size=1)
+        torch.nn.Conv2d(in_channels=12,out_channels=n_out, kernel_size=1),
+        torch.nn.Sigmoid()
     ).to(device)
 
 
@@ -808,13 +809,10 @@ def model_loader(model_path, n_in = 1, n_out = 6):
 def inference(model, image):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    activation = torch.nn.Sigmoid()
-
     # image shape should be (channel, height, width)
     raw_tensor = torch.from_numpy(image.copy()).unsqueeze(0).to(device)
 
-    logits = model(raw_tensor)
-    pred = activation(logits)
+    pred = model(raw_tensor)
     pred = pred.cpu().detach().numpy()
 
     return pred.squeeze(0)
