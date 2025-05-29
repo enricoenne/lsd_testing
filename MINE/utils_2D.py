@@ -40,7 +40,8 @@ class CellDataset_single(Dataset):
         output_type = 'labels',
         split = 'train',
         model = None,
-        sigma = 10):
+        sigma = 10,
+        aug = True):
 
         self.images = sorted(glob(image_dir))
         self.masks = sorted(glob(mask_dir))
@@ -58,6 +59,8 @@ class CellDataset_single(Dataset):
 
         # sigma for local shape descriptor
         self.sigma = sigma
+
+        self.aug = aug
 
         # set device
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -129,7 +132,7 @@ class CellDataset_single(Dataset):
         return landscape
 
     def ruin_boundaries_with_landscape(self, gt, base_blur=1, extra_blur=10,
-                                    intensity_range=(0.48, 0.72),
+                                    intensity_range=(0, 0.95),
                                     bg_range=0.1,
                                     distortion_magnitude = 0.3,
                                     seed=None):
@@ -145,46 +148,24 @@ class CellDataset_single(Dataset):
         blended_norm = blended * (1-landscape)
         blended_norm = (blended - np.min(blended)) / (np.max(blended) - np.min(blended))
 
-        bg_offset = np.random.normal(loc=intensity_range[0], scale=bg_range)
-        landscape_bg = (self.random_landscape(gt.shape, distortion_magnitude=1, seed=seed) - 0.5) * bg_range + bg_offset
+        landscape_bg = self.random_landscape(gt.shape, distortion_magnitude=1, seed=seed)* bg_range
 
         scaled = (intensity_range[1] - intensity_range[0]) * blended_norm + landscape_bg
 
         return scaled, landscape
 
     def get_lsds(self, labels, path):
+        labels = self.erode(
+            labels,
+            iterations=1,
+            border_value=1)
 
-        if path is not None:
-            path = f'{path}_s{self.sigma}.tif'
-            # if path is given and the file is there, load it
-            if os.path.exists(path):
-                return imread(path).astype(np.float32)
-            else:
-                labels = self.erode(
-                    labels,
-                    iterations=1,
-                    border_value=1)
-        
-                lsds = local_shape_descriptor.get_local_shape_descriptors(
-                        segmentation=labels,
-                        sigma=(self.sigma,)*2,
-                        voxel_size=(1,)*2)
-                lsds = lsds.astype(np.float32)
-                imsave(path, lsds)
-                return lsds
-        # if path is not given let's just calculate the lsds
-        else:
-            labels = self.erode(
-                labels,
-                iterations=1,
-                border_value=1)
-    
-            lsds = local_shape_descriptor.get_local_shape_descriptors(
-                    segmentation=labels,
-                    sigma=(self.sigma,)*2,
-                    voxel_size=(1,)*2)
-            lsds = lsds.astype(np.float32)
-            return lsds
+        lsds = local_shape_descriptor.get_local_shape_descriptors(
+                segmentation=labels,
+                sigma=(self.sigma,)*2,
+                voxel_size=(1,)*2)
+        lsds = lsds.astype(np.float32)
+        return lsds
 
     # get affinities (see gunpowder package)
     def get_aff(self, seg):
@@ -331,11 +312,11 @@ class CellDataset_single(Dataset):
         # slice first channel, relabel connected components
         labels = label(imread(labels_path)).astype(np.uint16)
 
-
         padding = self.get_padding(self.crop_size, self.padding_size)
 
         # augment data
-        raw, labels = self.augment_data(raw, labels, padding)
+        if self.aug:
+            raw, labels = self.augment_data(raw, labels, padding)
         
 
         # depending on the model I need different inputs
@@ -783,7 +764,7 @@ class UNet(torch.nn.Module):
 
         return y
 
-def model_loader(model_path, n_in = 1, n_out = 6):
+def model_loader(model_path, n_in = 1, n_out = 6, act = False):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = UNet(
         in_channels=n_in,
@@ -797,7 +778,7 @@ def model_loader(model_path, n_in = 1, n_out = 6):
     model = torch.nn.Sequential(
         model,
         torch.nn.Conv2d(in_channels=12,out_channels=n_out, kernel_size=1),
-        torch.nn.Sigmoid()
+        torch.nn.Sigmoid() if act else nn.Identity()
     ).to(device)
 
 

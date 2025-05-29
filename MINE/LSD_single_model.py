@@ -77,23 +77,14 @@ def model_training(input_dataset,
 
     model = torch.nn.Sequential(
         unet,
-        torch.nn.Conv2d(in_channels=num_fmaps,out_channels=num_out_channels, kernel_size=1),
-        torch.nn.Sigmoid()
+        torch.nn.Conv2d(in_channels=num_fmaps,out_channels=num_out_channels, kernel_size=1)
     ).to(device)
 
-    loss_fn_boundaries = torch.nn.BCELoss().to(device)
+    loss_fn_boundaries = torch.nn.BCEWithLogitsLoss().to(device)
     loss_fn_lsds = torch.nn.MSELoss().to(device)
 
 
-    #crop_size = 256
-    #training_steps = 200
-
-    # set optimizer
-    #learning_rate = 1e-4
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-
-    # set activation
-    activation = torch.nn.Sigmoid()
 
 
     ### create datasets
@@ -116,8 +107,6 @@ def model_training(input_dataset,
         sigma = lsd_sigma)
 
 
-    #batch_size = 4
-
     # make dataloaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=True)
     val_loader = DataLoader(val_dataset)
@@ -131,56 +120,37 @@ def model_training(input_dataset,
             optimizer.zero_grad()
             
         # forward
-        target_pred = model(feature)
-
-        if output_type == 'boundaries':
-            pred_boundaries = target_pred[:, 0, :, :]
-            gt_boundaries = gt_target[:, 0, :, :]
-            pred_lsds = None
-        elif output_type == 'boundaries_lsds':
-            pred_boundaries = target_pred[:, 0, :, :]
-            gt_boundaries = gt_target[:, 0, :, :]
-            pred_lsds = target_pred[:, 1:7, :, :]
-            gt_lsds = gt_target[:, 1:7, :, :]
-        elif output_type == 'lsds':
-            pred_boundaries = None
-            pred_lsds = target_pred[:, 0:6, :, :]
-            gt_lsds = gt_target[:, 0:6, :, :]
-
-        if pred_boundaries is not None:
-            loss_boundaries = loss_fn_boundaries(pred_boundaries, gt_boundaries)
-        else:
-            loss_boundaries = 0
-
-        if pred_lsds is not None:
-            loss_lsds = loss_fn_lsds(pred_lsds, gt_lsds)
-        else:
-            loss_lsds = 0
-
-
-        loss_value = loss_boundaries + loss_lsds
+        target_logits = model(feature)
+        # print(gt_target.min(), gt_target.max())
+        # print(target_pred.min(), target_pred.max())
         
+        target_pred = torch.sigmoid(target_logits)
+
+        if output_type == 'lsds':
+            loss_value = loss_fn_lsds(target_pred, gt_target)
+        elif output_type == 'boundaries':
+            # with Binary Cross Entropy Loss we need to use logits
+            loss_value = loss_fn_boundaries(target_logits, gt_target)
+        
+
         # backward if training mode
         if train_step:
             loss_value.backward()
             optimizer.step()
-
-            
     
         outputs = {
+            'loss': loss_value,
             'pred_target': target_pred,
         }
 
-        loss_value = loss_value.cpu().detach().numpy()
+        # if train_step == False and num_out_channels == 7:
+        #     loss_value_bound = loss_boundaries.cpu().detach().numpy()
+        #     loss_value_lsd = loss_lsds.cpu().detach().numpy()
 
-        if train_step == False and num_out_channels == 7:
-            loss_value_bound = loss_boundaries
-            loss_value_lsd = loss_lsds
-
-            loss_value = (loss_value, loss_value_bound.cpu().detach().numpy(), loss_value_lsd.cpu().detach().numpy())
+        #     loss_value = (loss_value, loss_value_bound, loss_value_lsd)
 
         
-        return np.array(loss_value), outputs
+        return outputs
 
     # training loop
 
@@ -205,7 +175,7 @@ def model_training(input_dataset,
                 feature = feature.to(device)
                 gt_target = gt_target.to(device)
                                             
-                loss_value, pred = model_step(model, optimizer, feature, gt_target, activation)
+                loss_value, pred = model_step(model, optimizer, feature, gt_target)
                 step += 1
                 pbar.update(1)
                 
@@ -217,7 +187,8 @@ def model_training(input_dataset,
                         feature = feature.to(device)
                         gt_target = gt_target.to(device)
 
-                        loss_value, _ = model_step(model, optimizer, feature, gt_target, activation, train_step=False)
+                        current_step = model_step(model, optimizer, feature, gt_target, train_step=False)
+                        loss_value = current_step['loss'].cpu().detach().numpy()
                         acc_loss.append(loss_value)
                     model.train()
                     acc_loss = np.array(acc_loss)
@@ -288,9 +259,9 @@ model_lsd = model_loader(model_lsds_path)
 print()
 print('model loaded')'''
 
-training_steps = 10000
+training_steps = 5000
 batch_size = 14
-crop_size = 128
+crop_size = 256
 
 lr = 1e-4
 
@@ -356,23 +327,12 @@ for sigma in sigmas:
                 model_lsds=model_lsd,
                 output_folder = 'lsd-bound_sigmas/test')'''
 
+training_steps = 10000
+batch_size = 14
+crop_size = 256
+lr = 1e-4
 
-
-'''input_type, output_type = 'boundaries_d', 'boundaries'
-
-model_training(input_dataset,
-                segmentation_dataset,
-                input_type,
-                output_type,
-                training_steps = training_steps,
-                batch_size = batch_size,
-                crop_size = crop_size,
-                show_metrics = False,
-                lsd_sigma = 15,
-                output_folder = 'boundary_reconstruction/proper_degradation_random_bg/',)'''
-
-
-input_type, output_type = 'raw', 'lsds'
+input_type, output_type = 'boundaries_d', 'boundaries'
 
 model_training(input_dataset,
                 segmentation_dataset,
@@ -383,9 +343,33 @@ model_training(input_dataset,
                 crop_size = crop_size,
                 show_metrics = False,
                 lsd_sigma = 15,
-                output_folder = 'new_models',)
+                output_folder = 'boundary_reconstruction',)
 
-model_name = '/home/enrico.negri/github/lsd_testing/output/new_models/step10000_b14_c128_lr0.0001_s15/raw-lsds.pth'
+
+
+training_steps = 5000
+batch_size = 14
+crop_size = 256
+lr = 1e-4
+
+# simple raw -> lsds model
+
+'''input_type, output_type = 'raw', 'lsds'
+model_training(input_dataset,
+                segmentation_dataset,
+                input_type,
+                output_type,
+                training_steps = training_steps,
+                batch_size = batch_size,
+                crop_size = crop_size,
+                show_metrics = False,
+                lsd_sigma = 15,
+                output_folder = 'new_models_test/activation',)'''
+
+
+# predicted lsd -> boundaries
+
+'''model_name = '/home/enrico.negri/github/lsd_testing/output/new_models/step5000_b14_c256_lr0.0001_s15/raw-lsds.pth'
 model_lsd = utils_2D.model_loader(model_name)
 
 input_type, output_type = 'lsds', 'boundaries'
@@ -399,4 +383,4 @@ model_training(input_dataset,
             show_metrics = False,
             lsd_sigma = 15,
             model_lsds=model_lsd,
-            output_folder = 'new_models')
+            output_folder = 'new_models/bce')'''
