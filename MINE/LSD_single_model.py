@@ -327,7 +327,7 @@ for sigma in sigmas:
                 model_lsds=model_lsd,
                 output_folder = 'lsd-bound_sigmas/test')'''
 
-training_steps = 10000
+'''training_steps = 10000
 batch_size = 14
 crop_size = 256
 lr = 1e-4
@@ -343,28 +343,29 @@ model_training(input_dataset,
                 crop_size = crop_size,
                 show_metrics = False,
                 lsd_sigma = 15,
-                output_folder = 'boundary_reconstruction',)
+                output_folder = 'boundary_reconstruction',)'''
 
 
 
-training_steps = 5000
+training_steps = 20000
 batch_size = 14
 crop_size = 256
-lr = 1e-4
+lr = 1e-5
 
 # simple raw -> lsds model
 
-'''input_type, output_type = 'raw', 'lsds'
+input_type, output_type = 'raw', 'lsds'
 model_training(input_dataset,
                 segmentation_dataset,
                 input_type,
                 output_type,
                 training_steps = training_steps,
+                learning_rate = lr,
                 batch_size = batch_size,
                 crop_size = crop_size,
                 show_metrics = False,
                 lsd_sigma = 15,
-                output_folder = 'new_models_test/activation',)'''
+                output_folder = 'new_models',)
 
 
 # predicted lsd -> boundaries

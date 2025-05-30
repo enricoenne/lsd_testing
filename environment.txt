@@ -21,3 +21,7 @@ pip install git+https://github.com/funkelab/funlib.learn.torch.git
 
 pip install tensorboardX
 pip install -U albumentations
+
+
+IT WORKS
+conda create -y -n lsd-env -c conda-forge python=3.10.16 lsds torch_em albumentations

@@ -797,3 +797,160 @@ def inference(model, image):
     pred = pred.cpu().detach().numpy()
 
     return pred.squeeze(0)
+
+class CellDataset_lsd(Dataset):
+    def __init__(
+        self,
+        image_dir,
+        mask_dir,
+        crop_size=None,
+        padding_size=8,
+        split = 'train',
+        aug = True):
+
+        self.images = sorted(glob(image_dir+'.tif'))
+        self.masks = sorted(glob(mask_dir + '_s15.tif'))
+
+        self.crop_size = crop_size
+        self.padding_size = padding_size
+
+        self.split = split
+        self.aug = aug
+
+        # set device
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+
+    def __len__(self):
+        return len(self.images)
+
+    # function to erode label boundaries
+    def erode(self, labels, iterations, border_value):
+
+        foreground = np.zeros_like(labels, dtype=bool)
+
+        # loop through unique labels
+        for label in np.unique(labels):
+
+            # skip background
+            if label == 0:
+                continue
+
+            # mask to label
+            label_mask = labels == label
+
+            # erode labels
+            eroded_mask = binary_erosion(
+                    label_mask,
+                    iterations=iterations,
+                    border_value=border_value)
+
+            # get foreground
+            foreground = np.logical_or(eroded_mask, foreground)
+
+        # and background...
+        background = np.logical_not(foreground)
+
+        # set eroded pixels to zero
+        labels[background] = 0
+
+        return labels
+
+
+
+    # takes care of padding
+    def get_padding(self, crop_size, padding_size):
+    
+        # quotient
+        q = int(crop_size / padding_size)
+    
+        if crop_size % padding_size != 0:
+            padding = (padding_size * (q + 1))
+        else:
+            padding = crop_size
+    
+        return padding
+    
+    # sample augmentations (see https://albumentations.ai/docs/examples/example_kaggle_salt)
+    def augment_data(self, raw, mask, padding):
+        
+        if self.split == 'train':
+            transform = A.Compose([
+                A.RandomCrop(
+                    width=self.crop_size,
+                    height=self.crop_size),
+                A.PadIfNeeded(
+                    min_height=padding,
+                    min_width=padding,
+                    p=1,
+                    border_mode=0),
+                A.HorizontalFlip(p=0.3),
+                A.VerticalFlip(p=0.3),
+                A.RandomRotate90(p=0.3),
+                A.Transpose(p=0.3),
+                A.RandomBrightnessContrast(p=0.3)
+            ])
+        else:
+            transform = A.Compose([
+                A.RandomCrop(
+                    width=self.crop_size,
+                    height=self.crop_size),
+                A.PadIfNeeded(
+                    min_height=padding,
+                    min_width=padding,
+                    p=1,
+                    border_mode=0)
+            ])
+
+        thresh = 0.02
+
+        # i want some labels in the cropped pic
+        # at least 10% of the cropped area
+        check = 1000
+        transformed = {'image': 0, 'mask': np.zeros((1,1,1))}
+        area = self.crop_size * self.crop_size
+
+        while np.sum(transformed['mask'] != 0) / area < thresh and check > 0:
+            transformed = transform(image=raw, mask=mask)
+
+            check -= 1
+
+        if check == 0 and np.sum(transformed['mask'] != 0) / area < thresh:
+            print('(._.)    no labels in crop')
+
+        raw, mask = transformed['image'], transformed['mask']
+        
+        return raw, mask
+
+    # normalize raw data between 0 and 1
+    def normalize(self, data):
+        return (data - np.min(data)) / (np.max(data) - np.min(data)).astype(np.float32)
+
+    def __getitem__(self, idx):
+
+        raw_path = self.images[idx]
+
+        lsds_path = self.masks[idx]
+
+        raw = imread(raw_path)
+        raw = self.normalize(raw)
+        
+        # slice first channel, relabel connected components
+        lsds = imread(lsds_path)
+
+        padding = self.get_padding(self.crop_size, self.padding_size)
+
+        input = np.expand_dims(raw, axis=0)
+
+        # augment data
+        if self.aug:
+            raw, lsds = self.augment_data(input, lsds, padding)
+        
+
+
+
+
+        output = lsds
+        
+
+        return input, output
